@@ -1,0 +1,8 @@
+{
+ "size": "xlarge",
+ "autogrow": "suggest",
+ "max_size": "max",
+ "tokenizer": "bpe",
+ "checkmode": true,
+ "showcheck": false
+}

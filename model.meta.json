@@ -1,0 +1,23 @@
+{
+ "n_patterns": 21306,
+ "corpus_len": 0,
+ "config": {
+  "d_model": 192,
+  "n_heads": 8,
+  "n_layers": 6,
+  "d_latent": 48,
+  "d_ff_expert": 256,
+  "n_experts": 6,
+  "max_seq_len": 384,
+  "use_rope": true,
+  "use_rmsnorm": true,
+  "use_mla": true,
+  "use_pointer": true,
+  "use_mtp": true,
+  "mtp_weight": 0.3,
+  "ptr_shift": false
+ },
+ "vocab_size": 600,
+ "tokenizer": "bpe",
+ "vocab_sig": "93cfab5cdfa2fb02ba90781ea80f7542"
+}
