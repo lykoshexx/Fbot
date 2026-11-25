@@ -7,47 +7,40 @@ from kivy.graphics import Color, RoundedRectangle
 from kivy.metrics import dp, sp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
-from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 
-Window.softinput_mode = "resize"          # keep the input box above the keyboard
+# Moves the whole screen up so the typing box sits just above the keyboard
+Window.softinput_mode = "below_target"
 Window.clearcolor = (0.07, 0.07, 0.09, 1)
 
-USER_BG, BOT_BG, SYS_BG = (0.16, 0.40, 0.85, 1), (0.20, 0.20, 0.25, 1), (0.12, 0.12, 0.15, 1)
+USER_BG, BOT_BG, SYS_BG = (0.16, 0.40, 0.85, 1), (0.22, 0.22, 0.28, 1), (0.12, 0.12, 0.15, 1)
 
 
-class Bubble(BoxLayout):
-    def __init__(self, text, bg, **kw):
-        super().__init__(size_hint=(0.85, None), padding=dp(10), **kw)
-        self.label = Label(text=text, color=(1, 1, 1, 1), font_size=sp(16), halign="left",
-                           valign="top", size_hint_y=None, markup=False)
-        self.label.bind(width=lambda *_: setattr(self.label, "text_size", (self.label.width, None)),
-                        texture_size=self._fit)
-        self.add_widget(self.label)
+class Msg(Label):
+    """One chat message: full-width row, coloured box, you on the right, bot on the left."""
+
+    def __init__(self, text, kind, **kw):
+        self.kind = kind
+        super().__init__(
+            text=text, font_size=sp(16), color=(1, 1, 1, 1), size_hint_y=None,
+            halign="right" if kind == "user" else "left", valign="middle", **kw)
         with self.canvas.before:
-            Color(*bg)
-            self.rect = RoundedRectangle(radius=[dp(14)])
-        self.bind(pos=self._draw, size=self._draw)
+            self._c = Color(*{"user": USER_BG, "bot": BOT_BG}.get(kind, SYS_BG))
+            self._r = RoundedRectangle(radius=[dp(14)])
+        self.bind(width=self._wrap, texture_size=self._fit, pos=self._draw, size=self._draw)
+
+    def _wrap(self, *_):
+        self.text_size = (max(self.width - dp(32), 10), None)
 
     def _fit(self, *_):
-        self.label.height = self.label.texture_size[1]
-        self.height = self.label.height + dp(20)
+        self.height = self.texture_size[1] + dp(28)
 
     def _draw(self, *_):
-        self.rect.pos, self.rect.size = self.pos, self.size
-
-
-class Row(FloatLayout):
-    def __init__(self, text, kind, **kw):
-        super().__init__(size_hint_y=None, **kw)
-        bg = {"user": USER_BG, "bot": BOT_BG}.get(kind, SYS_BG)
-        self.bubble = Bubble(text, bg)
-        self.bubble.pos_hint = {"right": 1} if kind == "user" else {"x": 0}
-        self.add_widget(self.bubble)
-        self.bubble.bind(height=lambda *_: setattr(self, "height", self.bubble.height))
-        self.height = self.bubble.height
+        self._r.pos = (self.x + dp(4), self.y)
+        self._r.size = (self.width - dp(8), self.height)
 
 
 class BotApp(App):
@@ -56,48 +49,47 @@ class BotApp(App):
     def build(self):
         self.bot = None
         self.busy = True
-        root = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(6))
+        root = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(8))
 
         top = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
-        top.add_widget(Label(text="FBot", font_size=sp(20), bold=True, halign="left"))
+        top.add_widget(Label(text="FBot", font_size=sp(20), bold=True))
         new_btn = Button(text="New chat", size_hint_x=None, width=dp(100),
-                         background_normal="", background_color=(0.2, 0.2, 0.25, 1))
+                         background_normal="", background_color=(0.22, 0.22, 0.28, 1))
         new_btn.bind(on_release=lambda *_: self.new_chat())
         top.add_widget(new_btn)
         root.add_widget(top)
 
         self.scroll = ScrollView(do_scroll_x=False)
-        self.chat = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(8), padding=(0, dp(4)))
+        self.chat = GridLayout(cols=1, size_hint_y=None, spacing=dp(12), padding=(0, dp(6)))
         self.chat.bind(minimum_height=self.chat.setter("height"))
         self.scroll.add_widget(self.chat)
         root.add_widget(self.scroll)
 
-        bar = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(6))
+        bar = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(6))
         self.inp = TextInput(multiline=False, hint_text="Type a message...", font_size=sp(16),
                              background_color=(0.15, 0.15, 0.19, 1), foreground_color=(1, 1, 1, 1),
                              hint_text_color=(0.6, 0.6, 0.65, 1), cursor_color=(1, 1, 1, 1),
-                             padding=(dp(12), dp(14)))
+                             padding=(dp(12), dp(15)))
         self.inp.bind(on_text_validate=lambda *_: self.send())
-        self.send_btn = Button(text="Send", size_hint_x=None, width=dp(80),
-                               background_normal="", background_color=USER_BG)
-        self.send_btn.bind(on_release=lambda *_: self.send())
+        send_btn = Button(text="Send", size_hint_x=None, width=dp(80),
+                          background_normal="", background_color=USER_BG)
+        send_btn.bind(on_release=lambda *_: self.send())
         bar.add_widget(self.inp)
-        bar.add_widget(self.send_btn)
+        bar.add_widget(send_btn)
         root.add_widget(bar)
 
         self.add("Loading the model...", "sys")
         threading.Thread(target=self._load, daemon=True).start()
         return root
 
-    # ---- helpers
     def add(self, text, kind):
-        row = Row(text, kind)
-        self.chat.add_widget(row)
+        m = Msg(text, kind)
+        self.chat.add_widget(m)
         self.to_bottom()
-        return row
+        return m
 
     def to_bottom(self):
-        Clock.schedule_once(lambda dt: setattr(self.scroll, "scroll_y", 0), 0.05)
+        Clock.schedule_once(lambda dt: setattr(self.scroll, "scroll_y", 0), 0.1)
 
     def _load(self):
         try:
@@ -125,26 +117,25 @@ class BotApp(App):
         self.inp.text = ""
         self.busy = True
         self.add(text, "user")
-        row = self.add("...", "bot")
-        threading.Thread(target=self._run, args=(text, row), daemon=True).start()
+        msg = self.add("...", "bot")
+        threading.Thread(target=self._run, args=(text, msg), daemon=True).start()
         Clock.schedule_once(lambda dt: setattr(self.inp, "focus", True), 0.1)
 
-    def _run(self, text, row):
+    def _run(self, text, msg):
         def show(t):
-            Clock.schedule_once(lambda dt: self._set(row, t or "..."))
+            Clock.schedule_once(lambda dt: self._set(msg, t or "..."))
         try:
-            final = self.bot.reply(text, on_text=show)
-            final = final or "(no reply)"
+            final = self.bot.reply(text, on_text=show) or "(no reply)"
         except Exception as e:
             final = "Error: %r" % (e,)
-        Clock.schedule_once(lambda dt: self._done(row, final))
+        Clock.schedule_once(lambda dt: self._done(msg, final))
 
-    def _set(self, row, t):
-        row.bubble.label.text = t
+    def _set(self, msg, t):
+        msg.text = t
         self.to_bottom()
 
-    def _done(self, row, t):
-        self._set(row, t)
+    def _done(self, msg, t):
+        self._set(msg, t)
         self.busy = False
 
 
