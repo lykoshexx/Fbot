@@ -13,6 +13,7 @@ from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
+from kivy.utils import platform
 
 Window.softinput_mode = ""          # we move the layout ourselves (see _kb_poll)
 Window.clearcolor = (0.07, 0.07, 0.09, 1)
@@ -20,6 +21,25 @@ Window.clearcolor = (0.07, 0.07, 0.09, 1)
 USER_BG, BOT_BG, SYS_BG = (0.16, 0.40, 0.85, 1), (0.22, 0.22, 0.28, 1), (0.12, 0.12, 0.15, 1)
 FONT = sp(16)
 _measure = CoreLabel(font_size=FONT)
+
+_base = {"v": None}
+
+
+def android_keyboard_px():
+    """Pixels of screen covered by the keyboard, asked straight from Android."""
+    try:
+        from jnius import autoclass
+        activity = autoclass("org.kivy.android.PythonActivity").mActivity
+        view = activity.getWindow().getDecorView()
+        rect = autoclass("android.graphics.Rect")()
+        view.getWindowVisibleDisplayFrame(rect)
+        covered = view.getHeight() - rect.bottom
+        # the smallest value ever seen = keyboard closed (this cancels the nav-bar height)
+        if _base["v"] is None or covered < _base["v"]:
+            _base["v"] = covered
+        return max(0, covered - _base["v"])
+    except Exception:
+        return None
 
 
 class Msg(Label):
@@ -113,10 +133,12 @@ class BotApp(App):
 
     def _kb_poll(self, dt):
         """Shrink the chat area by the keyboard's height (like a normal chat app)."""
-        try:
-            h = int(Window.keyboard_height)
-        except Exception:
-            h = 0
+        h = android_keyboard_px() if platform == "android" else None
+        if h is None:
+            try:
+                h = int(Window.keyboard_height)
+            except Exception:
+                h = 0
         if h != self._kb:
             self._kb = h
             p = dp(8)
