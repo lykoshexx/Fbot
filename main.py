@@ -1,3 +1,5 @@
+import json
+import os
 import threading
 
 from kivy.app import App
@@ -23,6 +25,7 @@ FONT = sp(16)
 _measure = CoreLabel(font_size=FONT)
 
 _base = {"v": None}
+MAX_SAVED = 60        # how many of your past exchanges are kept
 
 
 def android_keyboard_px():
@@ -96,6 +99,8 @@ class BotApp(App):
         self.bot = None
         self.busy = True
         self._kb = 0
+        self.save_path = os.path.join(self.user_data_dir, "chat.json")
+        self.pairs = self._load_saved()          # [(you, bot), ...]
         self.rootbox = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(8))
         root = self.rootbox
 
@@ -114,7 +119,7 @@ class BotApp(App):
         root.add_widget(self.scroll)
 
         bar = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(6))
-        self.inp = TextInput(multiline=False, hint_text="Type a message...", font_size=FONT,
+        self.inp = TextInput(multiline=False, input_type="text", hint_text="Type a message...", font_size=FONT,
                              background_color=(0.15, 0.15, 0.19, 1), foreground_color=(1, 1, 1, 1),
                              hint_text_color=(0.6, 0.6, 0.65, 1), cursor_color=(1, 1, 1, 1),
                              padding=(dp(12), dp(15)))
@@ -127,9 +132,35 @@ class BotApp(App):
         root.add_widget(bar)
 
         Clock.schedule_interval(self._kb_poll, 0.1)
-        self.add("Loading the model...", "sys")
+        for u, b in self.pairs:                  # show the previous chat straight away
+            self.add(u, "user")
+            self.add(b, "bot")
+        self.loading = self.add("Loading the model...", "sys")
         threading.Thread(target=self._load, daemon=True).start()
         return root
+
+    # ---- saving / restoring the chat
+    def _load_saved(self):
+        try:
+            with open(self.save_path, encoding="utf-8") as f:
+                return [(str(u), str(b)) for u, b in json.load(f)][-MAX_SAVED:]
+        except Exception:
+            return []
+
+    def _save(self):
+        try:
+            os.makedirs(self.user_data_dir, exist_ok=True)
+            with open(self.save_path, "w", encoding="utf-8") as f:
+                json.dump(self.pairs[-MAX_SAVED:], f)
+        except Exception:
+            pass
+
+    def on_pause(self):
+        self._save()
+        return True
+
+    def on_stop(self):
+        self._save()
 
     def _kb_poll(self, dt):
         """Shrink the chat area by the keyboard's height (like a normal chat app)."""
@@ -164,12 +195,19 @@ class BotApp(App):
 
     def _ready(self, bot):
         self.bot, self.busy = bot, False
-        self.add("Ready. Say hi!", "sys")
+        bot.fb.HISTORY.extend(self.pairs)        # the bot remembers the restored chat too
+        row = self.loading.parent
+        if row is not None:
+            self.chat.remove_widget(row)
+        if not self.pairs:
+            self.add("Ready. Say hi!", "sys")
 
     def new_chat(self):
         if self.busy or not self.bot:
             return
         self.bot.new_chat()
+        self.pairs = []
+        self._save()
         self.chat.clear_widgets()
         self.add("New chat started.", "sys")
 
@@ -187,18 +225,24 @@ class BotApp(App):
     def _run(self, text, msg):
         def show(t):
             Clock.schedule_once(lambda dt: self._set(msg, t or "..."))
+        ok = True
         try:
-            final = self.bot.reply(text, on_text=show) or "(no reply)"
+            final = self.bot.reply(text, on_text=show)
+            if not final:
+                final, ok = "(no reply)", False
         except Exception as e:
-            final = "Error: %r" % (e,)
-        Clock.schedule_once(lambda dt: self._done(msg, final))
+            final, ok = "Error: %r" % (e,), False
+        Clock.schedule_once(lambda dt: self._done(msg, final, text, ok))
 
     def _set(self, msg, t):
         msg.text = t
         self.to_bottom()
 
-    def _done(self, msg, t):
+    def _done(self, msg, t, user_text, ok):
         self._set(msg, t)
+        if ok:
+            self.pairs.append((user_text, t))
+            self._save()
         self.busy = False
 
 
