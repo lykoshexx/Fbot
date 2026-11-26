@@ -1238,8 +1238,40 @@ class ConfigurableGPT:
                 copy = np.zeros(V, dtype=dt); np.add.at(copy, np.array(ids[:pos + 1]), att)
             pg = 1.0 / (1.0 + np.exp(-(h @ W["Wg"] + W["bg"])))
             return gen * pg + copy * (1.0 - pg)
-        for pos in range(len(ids) - 1):
-            step(ids[pos], pos, False)
+        def prefill(n):
+            """Read the first n prompt tokens in ONE batched pass (same maths as n calls of step)."""
+            toks = np.array(ids[:n])
+            x = W["token_emb"][toks]                                     # (n, D)
+            causal = np.triu(np.full((n, n), -np.inf, dtype=dt), 1)
+            c_n, s_n = cos[:n], sin[:n]
+            def rope_b(t):                                                # t: (H, n, Dh)
+                rot = np.concatenate([-t[..., half:], t[..., :half]], axis=-1)
+                return t * c_n + rot * s_n
+            ar = np.arange(n)
+            for i in range(L):
+                g = lambda j: W[f"block{i}_p{j}"]
+                h = rms(x, g(0))
+                q = (h @ g(2) + g(3)).reshape(n, H, Dh).transpose(1, 0, 2)
+                c = h @ g(4)
+                k = (c @ g(5)).reshape(n, H, Dh).transpose(1, 0, 2)
+                v = (c @ g(6)).reshape(n, H, Dh).transpose(1, 0, 2)
+                q, k = rope_b(q), rope_b(k)
+                Kc[i][:, :n], Vc[i][:, :n] = k, v
+                sc = np.einsum("hqd,hkd->hqk", q, k) / np.sqrt(Dh) + causal
+                a = np.einsum("hqk,hkd->hqd", sm(sc), v).transpose(1, 0, 2).reshape(n, D)
+                x = x + (a @ g(7) + g(8))
+                h = rms(x, g(1))
+                shared = (silu(h @ g(9)) * (h @ g(10))) @ g(11)
+                probs = sm(h @ g(12)); e = probs.argmax(-1)               # one expert per token
+                out = np.zeros_like(x)
+                for ex in np.unique(e):
+                    m = e == ex
+                    hm = h[m]
+                    out[m] = (silu(hm @ g(13 + 3 * ex)) * (hm @ g(14 + 3 * ex))) @ g(15 + 3 * ex)
+                x = x + shared + out * probs[ar, e][:, None]
+            Kp[:n] = rms(x, W["lnf_w"]) @ W["Wk_ptr"]
+        if len(ids) > 1:
+            prefill(len(ids) - 1)
         pos = len(ids) - 1
         for _ in range(max_new_tokens):
             final = step(ids[pos], pos, True)
